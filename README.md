@@ -23,19 +23,22 @@ The app allows uploading multiple test files for classroom assignments. When a s
 2. Runs the private tests locally within the repository context.
 3. Reports the scores and test logs in the frontend.
 
-Users can upload any number of files/folders to create a detailed private test framework. The uploaded package must include a shell script named `test.sh`, which contains the code to start the private tests.
+Users can upload any number of files/folders to create a detailed private test framework. The uploaded package must include a shell script named `custom-test.sh`, which contains the code to start the private tests.
+
+A sample custom test is given [here for reference](./custom_test.sh).
 
 ### Permissions
-The app starts with a login page where the user must input a GitHub token. The token must have the following **read-only** permissions to fetch the required data:
+The app starts with a login page where the admin has to input a [GitHub Fine-grained personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). The user must have with `owner` role for the starter-code repo and `Classroom Admin` role on the github-classrooms. 
 
-#### GitHub Token Access:
-- **Repository**:
+Set the organization hosting the classroom starter-codes as the `token owner`.  
+
+The token must have the following **read-only** permissions to fetch the required data:
+- **Repository Acces**:
   - Administration
-  - Metadata
-  - Code
-  - Issues
-  - Pull Requests
-- **Organization**:
+  - Attestations
+  - Contents
+
+- **Organization Access**:
   - Administration
 
 The token must be generated from an admin account of the classroom. Specifically, the account must:
@@ -44,25 +47,55 @@ The token must be generated from an admin account of the classroom. Specifically
 
 Without adequate permissions from the correct account, the app cannot fetch the required data.
 
-## Try It Live
-
-A public instance of the app is available [here]() for anyone to use. Add your GitHub access token and explore.
-
-**Note**: For security and privacy reasons, the app does not cache any data. This may cause slight delays in operation.
-
-If you are concerned about the privacy of your classroom data, you can self-host this application with all its features.
-
-## Self-Hosting
+## Build and Run
+The apps can be compiled and self hosted in the admin's local machine. All data pertinent to the app, including the custom-test run are stored in the current directory.
 
 ### Prerequisites
-Node v23
+Following node and npm versions are required for compiling the app.
+
+```shell
+$ node -v
+v23.11.0
+
+$ npm -v
+11.3.0
+```
 
 ### Build Instructions
-run npm install on both frontend and backend 
-setup a secret key in the frontend .env file this will be used to encrypt and decrypy your token
 
-### Run Instructions
-npm run dev - frontend repo
-node index.js - backend repo (make sure it is running )
+**Backend**
+To build the backend, go to the `./backend` folder and install requirements.
+```shell
+cd backend/
+npm install
+```
+
+Start the backend server
+```shell
+$ node index.js 
+API listening at http://localhost:3000
+```
+
+**Frontend**
+Go to the `./frontend` folder and install requirements
+```shell
+cd frontend/
+npm install
+```
+
+Start the frontend app with
+```shell
+$ npm run dev
+
+> frontend@0.0.0 dev
+> vite
 
 
+  VITE v6.3.5  ready in 453 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+```
+
+Use any browser to go to `http://localhost:5173/` where you can see the app frontend in action. Create a github fine-grained-token to login into the app and start exploring data.
