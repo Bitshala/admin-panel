@@ -17,16 +17,18 @@ const Admin: React.FC = () => {
   const [tableClassroom, setTableClassroom] = useState("")
   const [tableAssignment, setTableAssignment] = useState("")
   const [loading, setLoading] = useState(true)
+  const [tcToken ,setTcToken] = useState()
   const [results, setResults] = useState<
     { url:any;  repo: string; passed: number; total: number; error?: string;}[]
   >([]);
 
   // decrypt token & instantiate Octokit once
-  let token = ""
+ 
   useEffect(() => {
     if (!encryptedToken || !secret) return
     const bytes = CryptoJS.AES.decrypt(encryptedToken, secret)
-    token = bytes.toString(CryptoJS.enc.Utf8)
+    const token = bytes.toString(CryptoJS.enc.Utf8)
+    setTcToken(JSON.parse(token));
     if (token) setOctokit(new Octokit({ auth: JSON.parse(token) }))
   }, [encryptedToken, secret])
 
@@ -97,10 +99,10 @@ async function downloadRepo(file: File) {
   }
 
   setResults([]);  // clear previous results
-
+  console.log(tcToken);
   for (const p of winners) {
     const form = new FormData();
-    form.append("token", token);
+    form.append("token", tcToken.toString());
     form.append("owner", p.repository.full_name.split("/")[0]);
     form.append("repo", p.repository.name);
     form.append("ref", p.repository.default_branch);

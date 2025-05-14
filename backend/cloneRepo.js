@@ -18,6 +18,7 @@ const execAsync = promisify(exec);
  * @returns {Promise<string>} – resolves with the local clone path
  */
 export async function cloneRepoToDocuments(token, owner, repo, ref = "main", replaceBuffer) {
+  console.log(token);
   if (!token) throw new Error("GITHUB_TOKEN must be set with `repo` scope");
 
   const gitUrl = `https://${token}@github.com/${owner}/${repo}.git`;

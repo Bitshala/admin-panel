@@ -8,11 +8,11 @@ import Student from './Student.tsx';
 
 const router = createBrowserRouter([
   {
-    path: "/Login",
+    path: "/",
     element: <Login />,
   },
   {
-    path: "/",
+    path: "/admin",
     element: <Admin />,
   },
   {
