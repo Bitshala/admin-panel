@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from "react-router";
 import './index.css'
-import Login from './login.tsx';
+import Login from './Login.tsx';
 import Admin from './Admin.tsx';
 import Student from './Student.tsx';
 
