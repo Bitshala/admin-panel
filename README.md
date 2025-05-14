@@ -55,10 +55,14 @@ If you are concerned about the privacy of your classroom data, you can self-host
 ## Self-Hosting
 
 ### Prerequisites
+Node v23
 
 ### Build Instructions
+run npm install on both frontend and backend 
+setup a secret key in the frontend .env file this will be used to encrypt and decrypy your token
 
 ### Run Instructions
-
+npm run dev - frontend repo
+node index.js - backend repo (make sure it is running )
 
 
