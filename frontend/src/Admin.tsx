@@ -235,11 +235,16 @@ useEffect(() => {
 }, [fetchAllStats]) 
 
 
-  useEffect(() => {
-  if (!octokit ) return
-   fetchParticipants(601173)
 
-  }, [octokit])
+
+
+useEffect(() => {
+  const firstAssignmentId = classrooms?.[0]?.assignments?.[0]?.id; 
+  if (!octokit || !firstAssignmentId) return;
+
+  fetchParticipants(firstAssignmentId);
+}, [octokit, classrooms]);   
+
 
 async function downloadRepo() {
   
