@@ -35,8 +35,10 @@ app.get('/login', (req, res) => {
   res.redirect(url);
 });
 
+// server.js
 app.get('/oauth/callback', async (req, res) => {
-  const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+  // 1. swap the code for an access_token
+  const ghRes = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -46,10 +48,18 @@ app.get('/oauth/callback', async (req, res) => {
       redirect_uri:  'http://localhost:3000/oauth/callback',
     }),
   });
-  const { access_token } = await tokenRes.json();
-  console.log('OAuth token:', access_token);
-  res.send('Authentication successful—check your server logs for the token.');
+
+  const { access_token } = await ghRes.json();
+
+  if (!access_token) {
+    return res.status(400).send('GitHub did not return a token');
+  }
+
+  res.redirect(
+    `http://localhost:5173/admin/#access_token=${encodeURIComponent(access_token)}`
+  );
 });
+
 
 
 app.get('/api/classrooms', async (_, res) => {

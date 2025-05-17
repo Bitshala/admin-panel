@@ -32,7 +32,7 @@ const Admin: React.FC = () => {
   const [nameSortAsc, setNameSortAsc] = useState<boolean | null>(null);
   const [gradeSortAsc, setGradeSortAsc] = useState<boolean | null>(null);
   const [file, setFile] = useState<File | undefined>()
-    const [deadlineSortAsc, setDeadlineSortAsc] = useState<boolean | null>(null);
+  const [forkSortAsc, setForkSortAsc] = useState<boolean | null>(null); // null = unsorted
   const [messageState, setMessageState] = useState("Test Data not available");
   const [globalStats, setGlobalStats] = useState<Stats>({
     total: 0, passing: 0, failing: 0, submissions: 0,
@@ -43,8 +43,30 @@ const Admin: React.FC = () => {
   >([]);
   const section1Ref = useRef(null);
 
-  // decrypt token & instantiate Octokit once
- 
+
+  useEffect(() => {
+    // ① grab anything after '#'
+    const hash = window.location.hash;               //  "#access_token=ghp_123..."
+    if (!hash.startsWith('#access_token=')) return;
+
+    const rawToken = decodeURIComponent(hash.split('=')[1]);
+
+    // ② encrypt & stash
+    if (rawToken && secret) {
+      const cipher = CryptoJS.AES.encrypt(JSON.stringify(rawToken), secret)
+                              .toString();
+      localStorage.setItem('encryptedToken', cipher);
+    }
+
+    // ③ scrub it from the address-bar so it never appears again
+    window.history.replaceState({}, '', window.location.pathname);
+    
+    // ④ let the rest of your app pick it up as usual
+    setTcToken(rawToken);
+    setOctokit(new Octokit({ auth: rawToken }));
+  }, [secret]);
+
+
   useEffect(() => {
     if (!encryptedToken || !secret) return
     const bytes = CryptoJS.AES.decrypt(encryptedToken, secret)
@@ -88,88 +110,125 @@ const Admin: React.FC = () => {
     fetchClassrooms()
   }, [octokit])
 
+  console.log(classrooms);
+  
 
-
-  // fetch participants for an assignment
-  const fetchParticipants = async (assignment_id: number) => {
-    section1Ref.current.scrollIntoView()  
-    if (!octokit) return
-    setTableLoading(true)
-    const data = await useSessionCache(
-      `gh:participants:${assignment_id}`,
-      () =>  
-        octokit.request( 
-          'GET /assignments/{assignment_id}/accepted_assignments',
-           { assignment_id, per_page: 100 }
-            ).then(r => r.data),
-           10 * 60_000  
-    )
-    const sorted = data.sort((a: any, b: any) =>
-      a.grade === '100/100' ? -1 :
-      b.grade === '100/100' ? 1 :
-      a.grade === '0/100'   ? -1 :
-      b.grade === '0/100'   ? 1 : 0
-    )
-    
-    setTableClassroom(sorted[0].assignment.classroom.name)
-    setTableAssignment(sorted[0].assignment.title)
-    setParticipants(sorted);
-    console.log(sorted);
-    setTableLoading(false)
-    setFilter('all')
+  /** 1 API call per repo, cached 10 min in sessionStorage */
+  async function getForkedAt(
+    octokit: Octokit,
+    fullName: string            // "owner/repo"
+  ): Promise<string> {
+    return useSessionCache(
+      `gh:meta:${fullName}`,
+      async () => {
+        const [owner, repo] = fullName.split("/");
+        const { data } = await octokit.request(
+          "GET /repos/{owner}/{repo}",
+          { owner, repo }
+        );
+        return data.created_at;           // ISO-8601 string
+      },
+      10 * 60_000
+    );
   }
+
+
+  const fetchParticipants = async (assignment_id: number) => {
+  section1Ref.current.scrollIntoView();
+  if (!octokit) return;
+  setTableLoading(true);
+
+  const data = await useSessionCache(
+    `gh:participants:${assignment_id}`,
+    () =>
+      octokit.request(
+        "GET /assignments/{assignment_id}/accepted_assignments",
+        { assignment_id, per_page: 100 }
+      ).then(r => r.data),
+    10 * 60_000
+  );
+
+  // ⚡ pull created_at for every repo (in parallel, with caching)
+  const enriched = await Promise.all(
+    data.map(async (p: any) => ({
+      ...p,
+      forkedAt: await getForkedAt(octokit, p.repository.full_name)
+    }))
+  );
+
+  const sorted = enriched.sort((a: any, b: any) =>
+    a.grade === "100/100" ? -1 :
+    b.grade === "100/100" ? 1  :
+    a.grade === "0/100"   ? -1 :
+    b.grade === "0/100"   ? 1  : 0
+  );
+
+  setTableClassroom(sorted[0].assignment.classroom.name);
+  setTableAssignment(sorted[0].assignment.title);
+  setParticipants(sorted);
+  console.log(sorted);
+  setTableLoading(false);
+  setFilter("all");
+};
+
  
 
-  const fetchAllStats = useCallback( async () => {
-  if (!octokit || classrooms.length === 0) return
+// 1) — run this once when the component mounts, so the UI shows cached numbers immediately
+useEffect(() => {
+  const cached = sessionStorage.getItem('globalStats');
+  if (cached) setGlobalStats(JSON.parse(cached));
+}, []);
 
-  const ids = classrooms.flatMap((c: any) => c.assignments.map((a: any) => a.id))
+// 2) — your existing function, now persisting the stats
+const fetchAllStats = useCallback(async () => {
+  if (!octokit || classrooms.length === 0) return;
 
-  const uniqueAll = new Set<string>()
-  const uniquePass = new Set<string>()
-  const uniqueFail = new Set<string>()
-  const uniqueSub = new Set<string>()
+  const ids = classrooms.flatMap((c: any) => c.assignments.map((a: any) => a.id));
+
+  const uniqueAll  = new Set<string>();
+  const uniquePass = new Set<string>();
+  const uniqueFail = new Set<string>();
+  const uniqueSub  = new Set<string>();
 
   await Promise.all(
     ids.map(async id => {
       const { data } = await octokit.request(
         'GET /assignments/{assignment_id}/accepted_assignments',
         { assignment_id: id, per_page: 100 }
-      )                           
+      );
+
       data.forEach(p => {
-  const login = p?.students?.[0]?.login
-  if (!login) return
+        const login = p?.students?.[0]?.login;
+        if (!login) return;
 
-  uniqueAll.add(login)
+        uniqueAll.add(login);
 
-  const g = parseInt(p.grade, 10)          // "100/100" → 100, "0/100" → 0
+        const g = parseInt(p.grade, 10);
+        if (!Number.isNaN(g) && g > 0) {
+          uniquePass.add(login);
+          uniqueFail.delete(login);
+        } else if (!uniquePass.has(login)) {
+          uniqueFail.add(login);
+        }
 
-  if (!Number.isNaN(g) && g > 0) {
-    // ✓ at least one assignment passed
-    uniquePass.add(login)
-    uniqueFail.delete(login)               // ⟵ ensure it is NOT in fail
-  } else if (!uniquePass.has(login)) {
-    // ✗ only add to fail if we haven't seen a pass yet
-    uniqueFail.add(login)
-  }
-
-  if (p.submitted || (p.commit_count ?? 0) > 0) {
-    uniqueSub.add(login)
-  }
-})
-
+        if (p.submitted || (p.commit_count ?? 0) > 0) {
+          uniqueSub.add(login);
+        }
+      });
     })
-  )
-  
+  );
 
-  setGlobalStats({
-    total: uniqueAll.size,
-    passing: uniquePass.size,
-    failing: uniqueFail.size,
+  const stats = {
+    total:       uniqueAll.size,
+    passing:     uniquePass.size,
+    failing:     uniqueFail.size,
     submissions: uniqueSub.size,
-  })
+  };
 
-}, [ octokit, classrooms])
+  setGlobalStats(stats);                                // keep React state
+  sessionStorage.setItem('globalStats', JSON.stringify(stats)); // <- **saves to session storage**
+}, [octokit, classrooms]);
+
 
 useEffect(() => {
   fetchAllStats()                  // ③ now fires whenever octokit or classrooms update
@@ -316,6 +375,18 @@ function sortAgainstGrade() {
   setParticipants(sorted);
 }
 
+function sortAgainstForked() {
+
+  const nextAsc = forkSortAsc === null ? false : !forkSortAsc;
+  setForkSortAsc(nextAsc);
+  const sorted = [...participants].sort((a, b) => {
+    const tA = new Date(a.forkedAt ?? a.repository?.forked_at).getTime();
+    const tB = new Date(b.forkedAt ?? b.repository?.forked_at).getTime();
+    return nextAsc ? tA - tB : tB - tA;
+  });
+  setParticipants(sorted);
+}
+
   return (
     
     <div className="px-12 mt-3 mb-12 font-sans">
@@ -352,14 +423,10 @@ function sortAgainstGrade() {
               >
                 {a.title}
               </button>
-
-              
               </div>
-              
             ))}
           </div>
         ))}
-  
       </div>
       
     <div className='flex flex-col rounded-md gap-2 mb-4'>
@@ -370,7 +437,7 @@ function sortAgainstGrade() {
         Total Active Participants
         </span>
          <span className='text-5xl'>
-         {globalStats.total}
+         {globalStats.total ? globalStats.total : `...`}
          </span>
       </div>
           <div className="text-xl mb-4  border-amber-500 border-2 w-90 h-24 rounded-md p-2 flex flex-col">
@@ -378,7 +445,7 @@ function sortAgainstGrade() {
         Total Passing
         </span>
          <span className='text-5xl'>
-         {globalStats.passing}
+          {globalStats.passing ? globalStats.passing : `...`}
          </span>
       </div>
       <div className="text-xl mb-4  border-amber-500 border-2 w-90 h-24 rounded-md p-2 flex flex-col">
@@ -386,7 +453,7 @@ function sortAgainstGrade() {
         Total Failing
         </span>
          <span className='text-5xl'>
-         {globalStats.failing}
+          {globalStats.failing ? globalStats.failing : `...`}
          </span>
       </div>
         <div className="text-xl mb-4  border-amber-500 border-2 w-90 h-24 rounded-md p-2 flex flex-col">
@@ -394,7 +461,7 @@ function sortAgainstGrade() {
         Assignments Accepted
         </span>
          <span className='text-5xl'>
-         {globalStats.submissions}
+          {globalStats.submissions ? globalStats.submissions : `...`}
          </span>
       </div>
       
@@ -450,9 +517,10 @@ function sortAgainstGrade() {
       ) : (
        
         <div className="overflow-auto">
-
+         <button onClick={sortAgainstForked} className="cursor-pointer">
+          Date Created {forkSortAsc === null ? '⇅' : forkSortAsc ? '↑' : '↓'}
+        </button>
           <table className="min-w-full border  ">
-
             <thead className="bg-[#f1760d]">
               <tr  >
                 <th className="p-2 border border-black text-white">Github Username 
