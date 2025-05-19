@@ -221,7 +221,7 @@ const fetchAllData = async (username?: string) => {
                ) : (
                  grade !== "100/100"
                    ? "NA"
-                   : "run test from admin"
+                   : "Test Data not available"
                )}
             </td>
           
