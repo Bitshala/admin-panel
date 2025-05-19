@@ -6,6 +6,13 @@ import { Link } from 'react-router'
 import UploadTest from './components/UploadTest'
 import { useSessionCache } from './utils/useSessionCache'
 
+import {
+  ColumnKey,
+  SortCriterion,
+  cycleOrder,
+  applySort,
+} from './utils/tableSort';
+
 
 type Stats = {
   total: number         
@@ -38,36 +45,34 @@ const Admin: React.FC = () => {
     total: 0, passing: 0, failing: 0, submissions: 0,
   })
 
+  const [sortStack, setSortStack] = useState<SortCriterion[]>([]);
   const [results, setResults] = useState<
     { url:any;  repo: string; passed: number; total: number; error?: string;}[]
   >([]);
   const section1Ref = useRef(null);
 
 
-  useEffect(() => {
-    // ① grab anything after '#'
-    const hash = window.location.hash;               //  "#access_token=ghp_123..."
+useEffect(() => {
+    
+    const hash = window.location.hash;               
     if (!hash.startsWith('#access_token=')) return;
 
     const rawToken = decodeURIComponent(hash.split('=')[1]);
 
-    // ② encrypt & stash
     if (rawToken && secret) {
       const cipher = CryptoJS.AES.encrypt(JSON.stringify(rawToken), secret)
                               .toString();
       localStorage.setItem('encryptedToken', cipher);
     }
 
-    // ③ scrub it from the address-bar so it never appears again
     window.history.replaceState({}, '', window.location.pathname);
-    
-    // ④ let the rest of your app pick it up as usual
+
     setTcToken(rawToken);
     setOctokit(new Octokit({ auth: rawToken }));
   }, [secret]);
 
-
-  useEffect(() => {
+   
+useEffect(() => {
     if (!encryptedToken || !secret) return
     const bytes = CryptoJS.AES.decrypt(encryptedToken, secret)
     const token = bytes.toString(CryptoJS.enc.Utf8)
@@ -75,48 +80,99 @@ const Admin: React.FC = () => {
     if (token) setOctokit(new Octokit({ auth: JSON.parse(token) }))
   }, [encryptedToken, secret])
 
-  // fetch user & classrooms once octokit is ready
-  useEffect(() => {
-    setLoading(true)
-    if (!octokit) return
 
-    const fetchUser = async () => {
+useEffect(() => {
+  if (!octokit) return;          // wait until Octokit is ready
+  setLoading(true);
+
+  const fetchUser = async () => {
+    try {
       const data = await useSessionCache(
-        'gh:user', 
-        () => octokit.request('GET /user').then(r => r.data)
-      )
-      setUser(data)
+        'gh:user',
+        () =>
+          octokit
+            .graphql<{
+              viewer: {
+                name: string | null;
+                avatarUrl: string;
+                url: string;
+              };
+            }>(`
+              query {
+                viewer {
+                  name
+                  avatarUrl
+                  url
+                }
+              }
+            `)
+            .then(r => r.viewer)   // strip the outer “viewer” key
+      );
+      setUser(data);
+    } finally {
+      setLoading(false);          // stop the spinner whether it succeeds or errors
     }
+  };
 
-    const fetchClassrooms = async () => {
+  fetchUser();
+}, [octokit]);
+
+
+useEffect(() => {
+  const firstAssignmentId = classrooms?.[0]?.assignments?.[0]?.id; 
+  if (!octokit || !firstAssignmentId) return;
+
+  fetchParticipants(firstAssignmentId);
+}, [octokit, classrooms]);   
+
+
+useEffect(() => {
+  if (!octokit) return;
+  setLoading(true);
+
+  const fetchClassrooms = async () => {
+    try {
       const cls = await useSessionCache(
-        'gh:classrooms',
-        () => octokit.request('GET /classrooms').then(r => r.data)
-        )
-      const withAssign = await Promise.all(
+        'gh:classrooms:min',                      
+        () => octokit.request('GET /classrooms').then(r => r.data),
+        10 * 60_000                               
+      );
+
+      const slim = await Promise.all(
         cls.map(async (c: any) => {
           const { data: assignments } = await octokit.request(
             'GET /classrooms/{classroom_id}/assignments',
             { classroom_id: c.id }
-          )
-          return assignments.length ? { ...c, assignments } : null
+          );
+
+          if (!assignments.length) return null;    // skip empty classrooms
+
+          return {
+            id:   c.id,
+            name: c.name,
+            url:  c.url,                           // that “View on GitHub” link
+            assignments: assignments.map((a: any) => ({
+              id:    a.id,
+              title: a.title,
+            })),
+          };
         })
-      )
-      setClassrooms(withAssign.filter(Boolean))
-       setLoading(false)
+      );
+
+      setClassrooms(slim.filter(Boolean));         // drop empty entries
+    } finally {
+      setLoading(false);
     }
+  };
 
-    fetchUser()
-    fetchClassrooms()
-  }, [octokit])
+  fetchClassrooms();
+}, [octokit]);
 
-  console.log(classrooms);
   
 
-  /** 1 API call per repo, cached 10 min in sessionStorage */
-  async function getForkedAt(
+async function getForkedAt(
     octokit: Octokit,
-    fullName: string            // "owner/repo"
+    fullName: string  
   ): Promise<string> {
     return useSessionCache(
       `gh:meta:${fullName}`,
@@ -126,14 +182,15 @@ const Admin: React.FC = () => {
           "GET /repos/{owner}/{repo}",
           { owner, repo }
         );
-        return data.created_at;           // ISO-8601 string
+        return data.created_at;         
       },
       10 * 60_000
     );
   }
 
 
-  const fetchParticipants = async (assignment_id: number) => {
+
+const fetchParticipants = async (assignment_id: number) => {
   section1Ref.current.scrollIntoView();
   if (!octokit) return;
   setTableLoading(true);
@@ -148,38 +205,31 @@ const Admin: React.FC = () => {
     10 * 60_000
   );
 
-  // ⚡ pull created_at for every repo (in parallel, with caching)
   const enriched = await Promise.all(
     data.map(async (p: any) => ({
       ...p,
       forkedAt: await getForkedAt(octokit, p.repository.full_name)
     }))
   );
+ 
 
-  const sorted = enriched.sort((a: any, b: any) =>
-    a.grade === "100/100" ? -1 :
-    b.grade === "100/100" ? 1  :
-    a.grade === "0/100"   ? -1 :
-    b.grade === "0/100"   ? 1  : 0
-  );
 
-  setTableClassroom(sorted[0].assignment.classroom.name);
-  setTableAssignment(sorted[0].assignment.title);
-  setParticipants(sorted);
-  console.log(sorted);
+  setTableClassroom(enriched[0].assignment.classroom.name);
+  setTableAssignment(enriched[0].assignment.title);
+  setParticipants(enriched);
+
   setTableLoading(false);
   setFilter("all");
 };
 
  
 
-// 1) — run this once when the component mounts, so the UI shows cached numbers immediately
 useEffect(() => {
   const cached = sessionStorage.getItem('globalStats');
   if (cached) setGlobalStats(JSON.parse(cached));
 }, []);
 
-// 2) — your existing function, now persisting the stats
+
 const fetchAllStats = useCallback(async () => {
   if (!octokit || classrooms.length === 0) return;
 
@@ -225,25 +275,14 @@ const fetchAllStats = useCallback(async () => {
     submissions: uniqueSub.size,
   };
 
-  setGlobalStats(stats);                                // keep React state
-  sessionStorage.setItem('globalStats', JSON.stringify(stats)); // <- **saves to session storage**
+  setGlobalStats(stats);                               
+  sessionStorage.setItem('globalStats', JSON.stringify(stats)); 
 }, [octokit, classrooms]);
 
 
 useEffect(() => {
-  fetchAllStats()                  // ③ now fires whenever octokit or classrooms update
+  fetchAllStats()               
 }, [fetchAllStats]) 
-
-
-
-
-
-useEffect(() => {
-  const firstAssignmentId = classrooms?.[0]?.assignments?.[0]?.id; 
-  if (!octokit || !firstAssignmentId) return;
-
-  fetchParticipants(firstAssignmentId);
-}, [octokit, classrooms]);   
 
 
 async function downloadRepo() {
@@ -357,49 +396,15 @@ async function downloadRepo() {
   return `[${exercise}...${user}]`;
 }
 
-function sortAgainstName() {
-  const nextAsc = nameSortAsc === null ? true : !nameSortAsc;
-  setNameSortAsc(nextAsc);
-
-  const sorted = [...participants].sort((a, b) => {
-    const cmp = a.students[0].login.localeCompare(b.students[0].login);
-    return nextAsc ? cmp : -cmp;
-  });
-  setParticipants(sorted);
-}
-
-function sortAgainstGrade() {
-  const nextAsc = gradeSortAsc === null ? false : !gradeSortAsc;
-  setGradeSortAsc(nextAsc);
-
-  const sorted = [...participants].sort((a, b) => {
-    const gA = parseInt(a.grade, 10);
-    const gB = parseInt(b.grade, 10);
-    return nextAsc ? gA - gB : gB - gA;
-  });
-  setParticipants(sorted);
-}
-
-function sortAgainstForked() {
-
-  const nextAsc = forkSortAsc === null ? false : !forkSortAsc;
-  setForkSortAsc(nextAsc);
-  const sorted = [...participants].sort((a, b) => {
-    const tA = new Date(a.forkedAt ?? a.repository?.forked_at).getTime();
-    const tB = new Date(b.forkedAt ?? b.repository?.forked_at).getTime();
-    return nextAsc ? tA - tB : tB - tA;
-  });
-  setParticipants(sorted);
-}
-
   return (
-    
+    <>
+   {!loading? 
     <div className="px-12 mt-3 mb-12 font-sans">
       {/* user info */} 
       {user && (
-        <a className='cursor-pointer' href={user.html_url} target="_blank" rel="noopener noreferrer">
+        <a className='cursor-pointer' href={user.url} target="_blank" rel="noopener noreferrer">
         <div className="flex items-center space-x-4 mb-2">
-          <img src={user.avatar_url} className="w-16 h-16 rounded-full" />
+          <img src={user.avatarUrl} className="w-16 h-16 rounded-full" />
           <h2 className="text-3xl font-semibold">{user.name}</h2>
         </div>
         </a>  
@@ -514,38 +519,31 @@ function sortAgainstForked() {
           >
             Failing ({failingCount})
           </button>
-        </div>
 
+        </div>
+          <button onClick={() => setSortStack([])}>Reset sorting</button>
       {/* participants table */}
       {tableLoading ? (
         <div className="text-center text-xl font-semibold">Loading…</div>
       ) : (
        
         <div className="overflow-auto">
-         <button onClick={sortAgainstForked} className="cursor-pointer">
-          Date Created {forkSortAsc === null ? '⇅' : forkSortAsc ? '↑' : '↓'}
-        </button>
+
           <table className="min-w-full border  ">
             <thead className="bg-[#f1760d]">
               <tr  >
                 <th className="p-2 border border-black text-white">Github Username 
-                   <button onClick={sortAgainstName} className="cursor-pointer ml-2">
-                    {nameSortAsc 
-                        ? '↑'
-                        : '↓'}
-                  </button>
+
                 </th>
                 <th className="p-2 border border-black text-white">Submission Repository</th>
                 <th className="p-2 border border-black text-white">Public Test  Grade
-                  <button onClick={sortAgainstGrade} className="cursor-pointer ml-2">
-                    {gradeSortAsc 
-                        ? '↑'
-                        : '↓'}
-                  </button>
+\
                 </th>
                 <th className="p-2 border border-black text-white">Private Test Grade
                 </th>
-           
+                 <th className="p-2 border border-black text-white"  >Date Created  <span className="text-lg"></span>
+\
+                </th>
               </tr>
             </thead>
         <tbody ref={section1Ref}>
@@ -634,7 +632,9 @@ function sortAgainstForked() {
                       messageState
                     )}
                   </td>
-
+                    <td className="p-2 border text-center" >
+                      {new Date(p.forkedAt ?? p.repository?.forked_at).toLocaleDateString()} 
+                    </td>
                   </tr>
                 )
               })}
@@ -645,7 +645,8 @@ function sortAgainstForked() {
       )}
 
     </div>
-
+ : null}
+</>
   )
 }
 
