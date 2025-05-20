@@ -6,13 +6,7 @@ import { Link } from 'react-router'
 import UploadTest from './components/UploadTest'
 import { useSessionCache } from './utils/useSessionCache'
 
-import {
-  ColumnKey,
-  SortCriterion,
-  cycleOrder,
-  applySort,
-} from './utils/tableSort';
-
+import MultiSelect from './components/MultiSelect'
 
 type Stats = {
   total: number         
@@ -36,16 +30,13 @@ const Admin: React.FC = () => {
   const [tableAssignment, setTableAssignment] = useState("")
   const [loading, setLoading] = useState(true)
   const [tcToken ,setTcToken] = useState()
-  const [nameSortAsc, setNameSortAsc] = useState<boolean | null>(null);
-  const [gradeSortAsc, setGradeSortAsc] = useState<boolean | null>(null);
   const [file, setFile] = useState<File | undefined>()
-  const [forkSortAsc, setForkSortAsc] = useState<boolean | null>(null); // null = unsorted
   const [messageState, setMessageState] = useState("Test Data not available");
   const [globalStats, setGlobalStats] = useState<Stats>({
     total: 0, passing: 0, failing: 0, submissions: 0,
   })
 
-  const [sortStack, setSortStack] = useState<SortCriterion[]>([]);
+
   const [results, setResults] = useState<
     { url:any;  repo: string; passed: number; total: number; error?: string;}[]
   >([]);
@@ -212,7 +203,9 @@ const fetchParticipants = async (assignment_id: number) => {
     }))
   );
  
-
+  const sorted = enriched.sort((a,b) =>{
+    
+  }) 
 
   setTableClassroom(enriched[0].assignment.classroom.name);
   setTableAssignment(enriched[0].assignment.title);
@@ -373,19 +366,25 @@ async function downloadRepo() {
   }
   
 }
+  const sortOptions = [
+    { label: 'Grade', value: 'grade' },
+    { label: 'Name', value: 'login' },
+    { label: 'Created At', value: 'forkedAt' },
+  ];
+  
 
+  
+   const [selectedSorts, setSelectedSorts] = useState([]);
+   const [selectedOrder, setSelectedOrder] = useState("asc")
   // derive stats
   const totalCount = participants.length
   const passingCount = participants.filter(p => parseInt(p.grade, 10) > 0).length
-  const failingCount = participants.filter(p => parseInt(p.grade, 10) === 0).length
+  const failingCount = participants.filter(p => parseInt(p.grade, 10) === 0 || p.grade === null).length
 
   // apply filter
-  const filtered = participants.filter(p => {
-    if (filter === 'all') return true
-    if (filter === 'passing') return parseInt(p.grade, 10) > 0
-    if (filter === 'failing') return parseInt(p.grade, 10) === 0
-    return true
-  })
+
+
+
 
  function formatGithubLink(url) {
   const repoName = url.replace(/\/+$/, '').split('/').pop();
@@ -396,11 +395,63 @@ async function downloadRepo() {
   return `[${exercise}...${user}]`;
 }
 
+const sortedParticipants = useMemo(() => {
+  if (selectedSorts.length === 0) return participants;
+
+  const toNumericGrade = (g?: string) =>
+    parseInt((g ?? "0/100").split('/')[0], 10);
+
+  return [...participants].sort((a, b) => {
+    for (const key of selectedSorts) {
+      let aVal: string | number, bVal: string | number;
+
+      switch (key) {
+        case 'grade':
+          aVal = toNumericGrade(a.grade);
+          bVal = toNumericGrade(b.grade);
+          break;
+
+        case 'login':
+          aVal = a.students[0].login.toLowerCase();
+          bVal = b.students[0].login.toLowerCase();
+          break;
+
+        case 'forkedAt':
+          aVal = new Date(a.forkedAt || a.repository.forked_at).getTime();
+          bVal = new Date(b.forkedAt || b.repository.forked_at).getTime();
+          break;
+
+        default:
+          aVal = (a as any)[key];
+          bVal = (b as any)[key];
+      }
+
+      if (aVal < bVal) return selectedOrder === 'asc' ? -1 : 1;
+      if (aVal > bVal) return selectedOrder === 'asc' ? 1 : -1;
+    }
+    return 0;
+  });
+}, [participants, selectedSorts, selectedOrder]);
+
+
+const filteredParticipants = useMemo(() => {
+  if (filter === 'all') return sortedParticipants;
+  return sortedParticipants.filter(p => {
+    const gradeNum = parseInt((p.grade ?? "0/100").split('/')[0], 10);
+    return filter === 'passing'
+      ? gradeNum > 0
+      : gradeNum === 0;
+  });
+}, [sortedParticipants, filter]);
+
+
+
   return (
     <>
    {!loading? 
     <div className="px-12 mt-3 mb-12 font-sans">
       {/* user info */} 
+      
       {user && (
         <a className='cursor-pointer' href={user.url} target="_blank" rel="noopener noreferrer">
         <div className="flex items-center space-x-4 mb-2">
@@ -414,7 +465,7 @@ async function downloadRepo() {
           <h2 className='text-lg text-gray-600 font-light'>Click on each assignment from the classroom to manage and analyse score</h2>
       </div>
 
-  
+
       {/* classrooms + assignments */}
       <div className="grid grid-cols-2 gap-4 mb-8">
         {classrooms.map(c => (
@@ -499,7 +550,7 @@ async function downloadRepo() {
       
       </div>
      
-      
+      <div  className='flex justify-between items-center mb-4'>
         <div className="flex space-x-4 mb-4 text-white">
           <button
             className={`px-4 py-2 rounded-t-lg ${filter === 'all' ? 'bg-[#f1760d] border-t border-l border-r' : 'bg-[#f1760d]'}`}
@@ -521,7 +572,23 @@ async function downloadRepo() {
           </button>
 
         </div>
-          <button onClick={() => setSortStack([])}>Reset sorting</button>
+        <div className='flex gap-2'>
+          <MultiSelect
+          options={sortOptions}
+          selectedValues={selectedSorts}
+          onChange={setSelectedSorts}
+          placeholder="Sort"
+        />
+
+        <select onChange={e => setSelectedOrder(e.target.value)} className=" border-2  rounded-md p-2">
+          <option value="asc">ASC</option>
+          <option value="dsc">DESC</option>
+        </select>
+
+        <button className=" border-2 rounded-md p-2 cursor-pointer" onClick={() => setSelectedSorts([])}>Clear Sort</button>
+
+      </div>
+      </div>
       {/* participants table */}
       {tableLoading ? (
         <div className="text-center text-xl font-semibold">Loading…</div>
@@ -537,17 +604,17 @@ async function downloadRepo() {
                 </th>
                 <th className="p-2 border border-black text-white">Submission Repository</th>
                 <th className="p-2 border border-black text-white">Public Test  Grade
-\
+
                 </th>
                 <th className="p-2 border border-black text-white">Private Test Grade
                 </th>
                  <th className="p-2 border border-black text-white"  >Date Created  <span className="text-lg"></span>
-\
+
                 </th>
               </tr>
             </thead>
         <tbody ref={section1Ref}>
-              {filtered.map(p => {
+              {filteredParticipants.map(p => {
               // grab the result object for this repo, if present
               const result = results.find(r => r.repo === p.repository.name);
                 return (
