@@ -44,6 +44,25 @@ const Student: React.FC = () => {
     if (token) setOctokit(new Octokit({ auth: JSON.parse(token) }))
   }, [encryptedToken, secret])
 
+
+async function getForkedAt(
+      octokit: Octokit,
+      fullName: string  
+    ): Promise<string> {
+      return useSessionCache(
+        `gh:meta:${fullName}`,
+        async () => {
+          const [owner, repo] = fullName.split("/");
+          const { data } = await octokit.request(
+            "GET /repos/{owner}/{repo}",
+            { owner, repo }
+          );
+          return data.created_at;         
+        },
+        10 * 60_000
+      );
+    }
+  
   // function: fetch all classrooms, assignments, and filtered participants
 const fetchAllData = async (username?: string) => {
   setLoading(true);
@@ -104,14 +123,21 @@ const fetchAllData = async (username?: string) => {
   const assignmentCount = flat.map(p => p.assignment.title).length;
   const passedCount     = flat.filter(p => p.grade === '100/100').length;
 
-  setParticipants(flat);
+
+  const enriched = await Promise.all(
+    flat.map(async (p: any) => ({
+      ...p,
+      forkedAt: await getForkedAt(octokit, p.repository.full_name)
+    }))
+  );
+
+  setParticipants(enriched);
   setTotalClassroom(uniqueClassroom.length);
   setTotalAssignments(assignmentCount);
   setTotalPassed(passedCount);
   setLoading(false);
   
-
-  return nested;           
+  console.log('enriched', enriched)     
 };
 
   useEffect(() => {
@@ -249,10 +275,11 @@ const fetchAllData = async (username?: string) => {
         <th className="p-2 border">Commit Count</th>
         <th className="p-2 border">Grade</th>
         <th className="p-2 border">Private Test Grade</th>
+        <th className="p-2 border">Date Created</th>
       </tr>
     </thead>
 
-    <tbody>
+    <tbody> 
       {sortedParticipants.map((p) => {
         // every `p` is one of your objects
         const student = p.students[0]  // you only have one student per entry
@@ -300,8 +327,10 @@ const fetchAllData = async (username?: string) => {
                    : "Test Data not available"
                )}
             </td>
-          
-              
+
+             <td className="p-2 border text-center" >
+                      {new Date(p.forkedAt ?? p.repository?.forked_at).toLocaleDateString()} 
+                    </td>   
           </tr>
         )
       })}

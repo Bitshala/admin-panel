@@ -36,7 +36,8 @@ const Admin: React.FC = () => {
     total: 0, passing: 0, failing: 0, submissions: 0,
   })
 
-
+  const [startDate, setStartDate] = useState<string>("")
+  const [endDate, setEndDate] = useState<string>("")
   const [results, setResults] = useState<
     { url:any;  repo: string; passed: number; total: number; error?: string;}[]
   >([]);
@@ -203,10 +204,6 @@ const fetchParticipants = async (assignment_id: number) => {
     }))
   );
  
-  const sorted = enriched.sort((a,b) =>{
-    
-  }) 
-
   setTableClassroom(enriched[0].assignment.classroom.name);
   setTableAssignment(enriched[0].assignment.title);
   setParticipants(enriched);
@@ -449,15 +446,24 @@ const sortedParticipants = useMemo(() => {
 }, [participants, selectedSorts, selectedOrder]);
 
 
+const dateFilteredParticipants = useMemo(() => {
+    return sortedParticipants.filter(p => {
+      const created = new Date(p.forkedAt ?? p.repository.forked_at)
+      if (startDate && created < new Date(startDate)) return false
+      if (endDate && created > new Date(endDate)) return false
+      return true
+    })
+  }, [sortedParticipants, startDate, endDate])
+
 const filteredParticipants = useMemo(() => {
-  if (filter === 'all') return sortedParticipants;
-  return sortedParticipants.filter(p => {
+  if (filter === 'all') return dateFilteredParticipants;
+  return dateFilteredParticipants.filter(p => {
     const gradeNum = parseInt((p.grade ?? "0/100").split('/')[0], 10);
     return filter === 'passing'
       ? gradeNum > 0
       : gradeNum === 0;
   });
-}, [sortedParticipants, filter]);
+}, [ dateFilteredParticipants, sortedParticipants, filter]);
 
 
 
@@ -587,6 +593,12 @@ const filteredParticipants = useMemo(() => {
           </button>
 
         </div>
+           <div className="flex gap-4 items-center mb-4">
+          <label>From:</label>
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border-2 rounded-md p-2" />
+          <label>To:</label>
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border-2 rounded-md p-2" />
+        </div>
         <div className='flex gap-2'>
           <MultiSelect
           options={sortOptions}
@@ -628,6 +640,15 @@ const filteredParticipants = useMemo(() => {
                 </th>
               </tr>
             </thead>
+            {filteredParticipants.length === 0 && (
+              <tbody>
+                <tr>
+                  <td colSpan={5} className="p-2 text-center">
+                    No participants found.
+                  </td>
+                </tr>
+              </tbody>
+            )}
         <tbody ref={section1Ref}>
               {filteredParticipants.map(p => {
               // grab the result object for this repo, if present
