@@ -374,8 +374,8 @@ async function downloadRepo() {
   
 
   
-   const [selectedSorts, setSelectedSorts] = useState([]);
-   const [selectedOrder, setSelectedOrder] = useState("asc")
+   const [selectedSorts, setSelectedSorts] = useState([ "grade" ]);
+   const [selectedOrder, setSelectedOrder] = useState("dsc")
   // derive stats
   const totalCount = participants.length
   const passingCount = participants.filter(p => parseInt(p.grade, 10) > 0).length
@@ -383,7 +383,8 @@ async function downloadRepo() {
 
   // apply filter
 
-
+ 
+ console.log('Selected Sorts:', selectedSorts);
 
 
  function formatGithubLink(url) {
@@ -580,7 +581,7 @@ const filteredParticipants = useMemo(() => {
           placeholder="Sort"
         />
 
-        <select onChange={e => setSelectedOrder(e.target.value)} className=" border-2  rounded-md p-2">
+        <select onChange={e => setSelectedOrder(e.target.value)} value={selectedOrder} className=" border-2  rounded-md p-2">
           <option value="asc">ASC</option>
           <option value="dsc">DESC</option>
         </select>
@@ -639,7 +640,7 @@ const filteredParticipants = useMemo(() => {
                         {formatGithubLink(p.repository.html_url)}
                       </a>
                     </td>
-                    <td className="p-2 border text-center">{p.grade}</td>
+                    <td className="p-2 border text-center">{p.grade === null || p.grade === "0/100" ? "FAIL" : p.grade}</td>
             
                   <td className="p-2 border text-center">
                     {p.grade !== "100/100" ? (
