@@ -284,7 +284,7 @@ async function downloadRepo() {
     return alert("Please select a file first!");
   }
    setMessageState("test run pending")
-  const winners = participants.filter(p => p.grade === "100/100");
+  const winners = participants.filter(p => p.grade === "10/100");
   if (winners.length === 0) {
     return alert("No participants with 100/100 found.");
   }
@@ -366,11 +366,13 @@ async function downloadRepo() {
   }
   
 }
-  const sortOptions = [
-    { label: 'Grade', value: 'grade' },
-    { label: 'Name', value: 'login' },
-    { label: 'Created At', value: 'forkedAt' },
-  ];
+
+const sortOptions = [
+  { label: 'Grade',         value: 'grade' },
+  { label: 'Private Grade', value: 'privateGrade' },
+  { label: 'Name',          value: 'login' },
+  { label: 'Created At',    value: 'forkedAt' },
+];
   
 
   
@@ -422,6 +424,18 @@ const sortedParticipants = useMemo(() => {
           bVal = new Date(b.forkedAt || b.repository.forked_at).getTime();
           break;
 
+        case 'privateGrade': {
+          const aRes = results.find(r => r.repo === a.repository.name);
+          const bRes = results.find(r => r.repo === b.repository.name);
+          // compute a ratio 0 – 1 (or 0 if no result)
+          aVal = aRes && aRes.total > 0
+            ? aRes.passed  / aRes.total
+            : 0;
+          bVal = bRes && bRes.total > 0
+            ? bRes.passed  / bRes.total
+            : 0;
+          break;
+        }
         default:
           aVal = (a as any)[key];
           bVal = (b as any)[key];

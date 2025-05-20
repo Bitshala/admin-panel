@@ -5,7 +5,7 @@ import './index.css'
 import Login from './Login.tsx';
 import Admin from './Admin.tsx';
 import Student from './Student.tsx';
-import { PrimeReactProvider } from "primereact/api";
+
 
 const router = createBrowserRouter([
   {
@@ -26,8 +26,6 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-      <PrimeReactProvider>
          <RouterProvider router={router} />
-      </PrimeReactProvider>
-  </StrictMode>,
+  </StrictMode>
 )
