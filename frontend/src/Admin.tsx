@@ -162,55 +162,102 @@ useEffect(() => {
 
   
 
-async function getForkedAt(
-    octokit: Octokit,
-    fullName: string  
-  ): Promise<string> {
-    return useSessionCache(
-      `gh:meta:${fullName}`,
-      async () => {
-        const [owner, repo] = fullName.split("/");
-        const { data } = await octokit.request(
-          "GET /repos/{owner}/{repo}",
-          { owner, repo }
-        );
-        return data.created_at;         
-      },
-      10 * 60_000
-    );
-  }
+// async function getForkedAt(
+//     octokit: Octokit,
+//     fullName: string  
+//   ): Promise<string> {
+//     return useSessionCache(
+//       `gh:meta:${fullName}`,
+//       async () => {
+//         const [owner, repo] = fullName.split("/");
+//         const { data } = await octokit.request(
+//           "GET /repos/{owner}/{repo}",
+//           { owner, repo }
+//         );
+//         return data.created_at;         
+//       },
+//       10 * 60_000
+//     );
+//   }
 
 
 
-const fetchParticipants = async (assignment_id: number) => {
-  section1Ref.current.scrollIntoView();
-  if (!octokit) return;
-  setTableLoading(true);
+// const fetchParticipants = async (assignment_id: number) => {
+//   section1Ref.current.scrollIntoView();
+//   if (!octokit) return;
+//   setTableLoading(true);
 
+//   const data = await useSessionCache(
+//     `gh:participants:${assignment_id}`,
+//     () =>
+//       octokit.request(
+//         "GET /assignments/{assignment_id}/accepted_assignments",
+//         { assignment_id, per_page: 100 }
+//       ).then(r => r.data),
+//     10 * 60_000
+//   );
+
+//   const enriched = await Promise.all(
+//     data.map(async (p: any) => ({
+//       ...p,
+//       forkedAt: await getForkedAt(octokit, p.repository.full_name)
+//     }))
+//   );
+ 
+//   setTableClassroom(enriched[0].assignment.classroom.name);
+//   setTableAssignment(enriched[0].assignment.title);
+//   setParticipants(enriched);
+
+//   setTableLoading(false);
+//   setFilter("all");
+// };
+
+async function fetchParticipants(assignment_id: number) {
+  section1Ref.current?.scrollIntoView()
+  setTableLoading(true)
+
+  // 1) REST fetch the participants
   const data = await useSessionCache(
     `gh:participants:${assignment_id}`,
     () =>
-      octokit.request(
-        "GET /assignments/{assignment_id}/accepted_assignments",
-        { assignment_id, per_page: 100 }
-      ).then(r => r.data),
+      octokit
+        .request(
+          "GET /assignments/{assignment_id}/accepted_assignments",
+          { assignment_id, per_page: 100 }
+        )
+        .then(r => r.data),
     10 * 60_000
-  );
+  )
 
-  const enriched = await Promise.all(
-    data.map(async (p: any) => ({
-      ...p,
-      forkedAt: await getForkedAt(octokit, p.repository.full_name)
-    }))
-  );
- 
-  setTableClassroom(enriched[0].assignment.classroom.name);
-  setTableAssignment(enriched[0].assignment.title);
-  setParticipants(enriched);
+  // 2) collect every repo’s node_id
+  const repoNodeIds = data.map((p: any) => p.repository.node_id)
 
-  setTableLoading(false);
-  setFilter("all");
-};
+  // 3) one GraphQL call to get createdAt for all
+  const { nodes } = await octokit.graphql<{
+    nodes: Array<{ id: string; createdAt: string }>
+  }>(
+    `query ($ids: [ID!]!) {
+       nodes(ids: $ids) {
+         ... on Repository { id createdAt }
+       }
+     }`,
+    { ids: repoNodeIds }
+  )
+
+  const createdAtById = new Map(nodes.map(n => [n.id, n.createdAt]))
+
+  // 4) enrich your participants
+  const enriched = data.map((p: any) => ({
+    ...p,
+    forkedAt: createdAtById.get(p.repository.node_id) || p.repository.created_at
+  }))
+
+  setTableClassroom(enriched[0].assignment.classroom.name)
+  setTableAssignment(enriched[0].assignment.title)
+  setParticipants(enriched)
+  setTableLoading(false)
+  setFilter("all")
+}
 
  
 
@@ -622,21 +669,17 @@ const filteredParticipants = useMemo(() => {
       ) : (
        
         <div className="overflow-auto">
-
           <table className="min-w-full border  ">
             <thead className="bg-[#f1760d]">
               <tr  >
                 <th className="p-2 border border-black text-white">Github Username 
-
                 </th>
                 <th className="p-2 border border-black text-white">Submission Repository</th>
                 <th className="p-2 border border-black text-white">Public Test  Grade
-
                 </th>
                 <th className="p-2 border border-black text-white">Private Test Grade
                 </th>
-                 <th className="p-2 border border-black text-white"  >Date Created  <span className="text-lg"></span>
-
+                 <th className="p-2 border border-black text-white">Date Created<span className="text-lg"></span>
                 </th>
               </tr>
             </thead>
