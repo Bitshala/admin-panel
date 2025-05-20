@@ -284,7 +284,7 @@ async function downloadRepo() {
     return alert("Please select a file first!");
   }
    setMessageState("test run pending")
-  const winners = participants.filter(p => p.grade === "10/100");
+  const winners = participants.filter(p => p.grade === "100/100");
   if (winners.length === 0) {
     return alert("No participants with 100/100 found.");
   }
@@ -663,34 +663,10 @@ const filteredParticipants = useMemo(() => {
                       result.error ? (
                         result.error
                       ) : (
-                        <div className="flex justify-center">
+                        <div className="flex justify-center gap-3">
                           {`${result.passed * 100}/${result.total * 100}`}
-                          <div className="ml-12 flex gap-2">
-                            <a
-                              href={`http://localhost:3000${result.url}`}
-                              download
-                              aria-label="Download private-test log"
-                              className="hover:opacity-70"
-                            >
-                              <svg width="24" height="24" viewBox="0 0 24 24">
-                                <g transform="scale(.4) translate(12 12)">
-                                  <path
-                                    d="M 20 8 C 13.54 8 8.37 13.11 8.09 19.5
-                                      C 3.42 20.78 0 25 0 30
-                                      C 0 36.05 4.95 41 11 41 H 41
-                                      C 45.95 41 50 36.95 50 32
-                                      C 50 28.10 47.40 24.79 43.91 23.62
-                                      C 43.70 17.76 38.91 13 33 13
-                                      c -1.04 0 -2.01.26 -2.97.53
-                                      C 27.88 10.26 24.22 8 20 8 Z
-                                      M 24 20 V 31.56 L 19.72 27.28
-                                      l -1.44 1.44 6 6 .72 .69 .72 -.69
-                                      l 6 -6 -1.44 -1.44 L 26 31.56 V 20 Z"
-                                    fill="currentColor"
-                                  />
-                                </g>
-                              </svg>
-                            </a>
+                          <div className="">
+                            
                             <a
                               href={`http://localhost:3000/outputs/${result.url.replace('/download/', '/')}`}
                               target="_blank"

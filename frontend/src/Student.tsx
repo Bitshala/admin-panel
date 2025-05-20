@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState,useMemo } from 'react'
 import CryptoJS from 'crypto-js'
 import { Octokit } from 'octokit'
 import { useLocation } from 'react-router'
 
 import { useSessionCache } from './utils/useSessionCache'
+import MultiSelect from './components/MultiSelect'
 
 const Student: React.FC = () => {
   const secret = import.meta.env.VITE_SECRET_KEY
@@ -14,21 +15,26 @@ const Student: React.FC = () => {
   const [classrooms, setClassrooms] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [participants, setParticipants] = useState<any[]>([])
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [total,setTotal] = useState("");
-  const [passed,setPassed] = useState("");
-  const [ downloadLink, setDownloadLink] = useState("");
   const [totalClassroom, setTotalClassroom] = useState(0);
   const [totalAssignments, setTotalAssignments] = useState(0);
   const [totalPassed, setTotalPassed] = useState(0);
+  const [selectedSorts, setSelectedSorts] = useState<string[]>([])
+  const [selectedOrder, setSelectedOrder] = useState<'asc'|'dsc'>('asc')
 
 
   // read username filter from link state
   const { state } = useLocation()
   const filterName: string | undefined = state?.participantName
   const result = state?.result
-  console.log(result)
 
+ 
+  const sortOptions = [
+    { label: 'Assignment',    value: 'assignment'    },
+    { label: 'Classroom',     value: 'classroom'     },
+    { label: 'Commits',       value: 'commit_count'  },
+    { label: 'Grade',         value: 'grade'         },
+    { label: 'Private Grade', value: 'privateGrade'  },
+  ]
 
   // decrypt token & instantiate Octokit once
   useEffect(() => {
@@ -103,8 +109,8 @@ const fetchAllData = async (username?: string) => {
   setTotalAssignments(assignmentCount);
   setTotalPassed(passedCount);
   setLoading(false);
-  altstd = flat[0].students[0];
-  console.log(altstd)
+  
+
   return nested;           
 };
 
@@ -112,6 +118,53 @@ const fetchAllData = async (username?: string) => {
     if (!octokit) return
     fetchAllData(filterName).then(setClassrooms)
   }, [octokit, filterName])
+
+
+  const sortedParticipants = useMemo(() => {
+  if (selectedSorts.length === 0) return participants
+
+  return [...participants].sort((a, b) => {
+    for (const key of selectedSorts) {
+      let aVal: string|number = 0, bVal: string|number = 0
+
+      switch (key) {
+        case 'assignment':
+          aVal = a.assignment.title.toLowerCase()
+          bVal = b.assignment.title.toLowerCase()
+          break
+
+        case 'classroom':
+          aVal = a.assignment.classroom.name.toLowerCase()
+          bVal = b.assignment.classroom.name.toLowerCase()
+          break
+
+        case 'commit_count':
+          aVal = a.commit_count ?? 0
+          bVal = b.commit_count ?? 0
+          break
+
+        case 'grade':
+          // treat null as "0/100"
+          aVal = parseInt((a.grade ?? '0/100').split('/')[0], 10)
+          bVal = parseInt((b.grade ?? '0/100').split('/')[0], 10)
+          break
+
+        case 'privateGrade': {
+          const rA = result.find(r => r.repo === a.repository.name)
+          const rB = result.find(r => r.repo === b.repository.name)
+          aVal = rA && rA.total>0 ? rA.passed/rA.total : 0
+          bVal = rB && rB.total>0 ? rB.passed/rB.total : 0
+          break
+        }
+      }
+
+      if (aVal < bVal) return selectedOrder==='asc' ? -1 : 1
+      if (aVal > bVal) return selectedOrder==='asc' ?  1 : -1
+      // equal → continue to next key
+    }
+    return 0
+  })
+}, [participants, selectedSorts, selectedOrder, result])
 
  
   return (
@@ -163,6 +216,29 @@ const fetchAllData = async (username?: string) => {
       
       </div>
     </div>
+
+    <div className="flex items-center gap-4 mb-4">
+  <MultiSelect
+    options={sortOptions}
+    selectedValues={selectedSorts}
+    onChange={setSelectedSorts}
+    placeholder="Sort by…"
+  />
+  <select
+    value={selectedOrder}
+    onChange={e => setSelectedOrder(e.target.value as 'asc'|'dsc')}
+    className="border rounded p-1"
+  >
+    <option value="asc">ASC</option>
+    <option value="dsc">DESC</option>
+  </select>
+  <button
+    onClick={() => setSelectedSorts([])}
+    className="border rounded px-2 py-1"
+  >
+    Clear Sort
+  </button>
+</div>
 {!loading ? 
   <table className="min-w-full border">
     <thead className="bg-[#f1760d] ">
@@ -177,7 +253,7 @@ const fetchAllData = async (username?: string) => {
     </thead>
 
     <tbody>
-      {participants.map((p) => {
+      {sortedParticipants.map((p) => {
         // every `p` is one of your objects
         const student = p.students[0]  // you only have one student per entry
         const { assignment, commit_count, grade, repository } = p
